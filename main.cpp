@@ -15,9 +15,6 @@ int main(int argc, char **argv)
     data_image_file >> data_image_m >> data_image_n;
     query_image_file >> query_image_m >> query_image_n;
 
-    // reading a matrix from a file
-    // with first line m*n
-
     int data_image_matrix[data_image_m][data_image_n][3];
     int query_image_matrix[query_image_m][query_image_n][3];
 
