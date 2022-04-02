@@ -1,6 +1,7 @@
 #include <iostream>
 #include <fstream>
 #include <cmath>
+#include <omp.h>
 using namespace std;
 
 int main(int argc, char **argv)
@@ -35,6 +36,7 @@ int main(int argc, char **argv)
     }
     data_image_file.close();
     query_image_file.close();
+    cout<<"size of data "<<sizeof(data_image)/sizeof(data_image[0])<<'\n';
     cout<<"file read\n";
     //Limits of the bounding box
     float xmin[] = {0, 0, -0.707*query_image_n};//0 = -45, 1 = 0, 2 = 45
@@ -43,13 +45,13 @@ int main(int argc, char **argv)
     float ymax[] = {query_image_n*0.707, query_image_n, (query_image_m+query_image_n)*0.707};
     float cos[] = {0.707, 1, 0.707};
     float sin[] = {-0.707,0, 0.707};
-    float grey_sum=0;
+    
     bool RMS = false;
     int row = data_image_n;
     int col = data_image_m;
     
-    float TH2 = 10.0;//for difference between grey of the q and d
-    float TH1 = 0.1;//RMSD difference
+    float TH2 = 50.0;//for difference between grey of the q and d
+    float TH1 = 20;//RMSD difference
     
     int topper[3];
     int bestscore = 255;
@@ -63,15 +65,21 @@ int main(int argc, char **argv)
     }
     query_grey = query_grey/(query_image_m*query_image_n*3);
     cout<<"query grey "<<query_grey<<'\n';
+
+    //int start[8];
+    //int end[8];
+    omp_set_num_threads(8);
     int iter =0;
     for (int theta=0; theta<3; theta++){
+        #pragma omp parallel for 
         for (int x=0; x< data_image_m ;x++){
             for (int y=0; y< data_image_n; y++){
-                grey_sum=0;
+                float grey_sum=0;
                 for (int X= x+ xmin[theta]; X< x + xmax[theta]; X++ ){//grey avg of image
                     for (int Y=y+ymin[theta]; Y< y + ymax[theta]; Y++){
                         for (int color=0; color<3; color++){
-                            if(X< data_image_m && Y<data_image_n){
+                            
+                            if(X>=0 && Y>= 0 && X< col && Y < row){
                                 grey_sum += data_image[(row-1 - Y)*(col)*3 + X*3 + color];
                             }else{
                                 grey_sum +=255;
@@ -80,7 +88,7 @@ int main(int argc, char **argv)
                     }
                 }
                 grey_sum = grey_sum/( (ymax[theta] - ymin[theta])*(xmax[theta] - xmin[theta])*3);
-                
+                //cout<<"grey sum of data = "<<grey_sum<<'\n';
                 /*if(abs(grey_sum - query_grey)<TH2){//for checking filter work
                     topper[0] = x;
                     topper[1] = y;
@@ -105,8 +113,10 @@ int main(int argc, char **argv)
                             for (int c=0;c<3;c++){
                                 color_val=255;
                                 int z00=255,z01=255,z10=255,z11=255;
-                                if(x0==x1 && y0==y1 && x0<col && y0<row){
-                                    color_val = data_image[(row-1-y0)*col*3 + x0*3+c];
+                                if(x0==x1 && y0==y1){
+                                    if(x0>=0 && y0>=0 && x0<col && y0<row){
+                                        color_val = data_image[(row-1-y0)*col*3 + x0*3+c];
+                                    }
                                 }else if(x0==x1 && x0<col){
                                     if(y0>=0 && y0<row){
                                         z00 = data_image[(row-y0-1)*col*3 + x0*3 + c];
@@ -115,7 +125,6 @@ int main(int argc, char **argv)
                                         z01 = data_image[(row-y1-1)*col*3 + x0*3 + c];
                                     }
                                     color_val = (y1-rotated_y)*z00+(y0-rotated_y)*z01;
-                                }else if(y0==y1 && y0<row){
                                     if(x0>=0 && x0<col){
                                         z00 = data_image[(row-y0-1)*col*3 + x0*3 + c];
                                     }
@@ -126,18 +135,18 @@ int main(int argc, char **argv)
                                 }
                                 else if(x0!=x1 && y0!=y1){
                                     //bilinear over the 
-                                    if(y0<col && y0>=0){
-                                        if(x0<row && x0>=0)
+                                    if(y0<row && y0>=0){
+                                        if(x0<col && x0>=0)
                                             z00 = data_image[(row-y0-1)*col*3 + x0*3 + c];
-                                        if(x1<row && x1>=0){
+                                        if(x1<col && x1>=0){
                                             z10 = data_image[(row-y0-1)*col*3 + x1*3 + c];
                                         }
                                     }
                                     
-                                    if(y1<col && y1>=0){
-                                        if(x0<row && x0>=0)
+                                    if(y1<row && y1>=0){
+                                        if(x0<col && x0>=0)
                                             z01 = data_image[(row-y1-1)*col*3 + x0*3 + c];
-                                        if(x1<row && x1>=0){
+                                        if(x1<col && x1>=0){
                                             z11 = data_image[(row-y1-1)*col*3 + x1*3 + c];
                                         }
                                     }
@@ -153,12 +162,15 @@ int main(int argc, char **argv)
                     }
                     float RMSD = sqrt(square_diff/(query_image_m*query_image_n*3));
                     if (RMSD < TH1 && RMSD < bestscore){
-                        topper[0] = x;
-                        topper[1] = y;
-                        topper[2] = theta;
-                        bestscore = RMSD;
-                        cout<<"grey sum "<<grey_sum<<", RMSD "<<RMSD<<'\n';
-                        cout<<"tuple "<<topper[0]<<','<<topper[1]<<','<<topper[2]<<'\n';
+                        #pragma omp critical
+                        {
+                            topper[0] = x;
+                            topper[1] = y;
+                            topper[2] = theta;
+                            bestscore = RMSD;
+                            cout<<"grey sum "<<grey_sum<<", RMSD "<<RMSD<<'\n';
+                            cout<<"tuple "<<topper[0]<<','<<topper[1]<<','<<topper[2]<<'\n';
+                        }
                     }
 
                 }
