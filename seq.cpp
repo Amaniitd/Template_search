@@ -117,7 +117,7 @@ int main(int argc, char **argv)
                                     if(x0>=0 && y0>=0 && x0<col && y0<row){
                                         color_val = data_image[(row-1-y0)*col*3 + x0*3+c];
                                     }
-                                }else if(x0==x1 && x0<col){
+                                }else if(x0==x1 && x0>=0 && x0<col){
                                     if(y0>=0 && y0<row){
                                         z00 = data_image[(row-y0-1)*col*3 + x0*3 + c];
                                     }
@@ -125,13 +125,14 @@ int main(int argc, char **argv)
                                         z01 = data_image[(row-y1-1)*col*3 + x0*3 + c];
                                     }
                                     color_val = (y1-rotated_y)*z00+(y0-rotated_y)*z01;
+                                }else if(y0==y1 && y0>=0 && y0<row){
                                     if(x0>=0 && x0<col){
                                         z00 = data_image[(row-y0-1)*col*3 + x0*3 + c];
                                     }
                                     if(x1>=0 && x1<col){
                                         z10 = data_image[(row-y0-1)*col*3 + x1*3 + c];
                                     }
-                                    color_val = (x1-rotated_y)*z00+(x0-rotated_y)*z10;
+                                    color_val = (x1-rotated_y)*z00+(x0-rotated_y)*z10; 
                                 }
                                 else if(x0!=x1 && y0!=y1){
                                     //bilinear over the 
