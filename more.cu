@@ -11,7 +11,9 @@ using namespace std;
 index 0  - -45, 1 - 0, 2 - 45 
 */
 //range = xmin + xmax + ymin + ymax
-
+bool comp(const vector<float>& a, vector<float>& b){
+    return a[3]<b[3];
+}
 
 __global__ void filter(int * data_image, int * range, int query_grey,int row, int col, int TH2, char * filtered){//filer the candidates for calculting the RMSD
     int y = blockIdx.y * blockDim.y + threadIdx.y;
@@ -149,8 +151,11 @@ int main(int argc, char **argv)
     query_image_file >> query_image_m >> query_image_n;
     
     cout<<data_image_m<<','<<data_image_n<<'\n';
+
     int data_image[data_image_m*data_image_n*3];
+    
     int query_image[query_image_m*query_image_n*3];
+
     for (int i = 0; i < data_image_m*data_image_n*3; i++)
     {
             data_image_file >> data_image[i];
@@ -166,9 +171,9 @@ int main(int argc, char **argv)
     {
             query_image_file >> query_image[i];
     }
+
     data_image_file.close();
     query_image_file.close();
-    cout<<"size of data "<<sizeof(data_image)/sizeof(data_image[0])<<'\n';
     //0 = -45, 1 = 0, 2 = 45
     
     int range[] = {0, 0, floor(-0.707*query_image_n),
@@ -183,7 +188,7 @@ int main(int argc, char **argv)
     cudaMalloc(&dqimage,  4*query_image_n*query_image_m*3);
 
     cudaMemcpy(drange, range, 12*4, cudaMemcpyHostToDevice);
-    cudaMemcpy(dqimage, query_image,  query_image_m*query_image_n*3*4, cudaMemcpyHostToDevice);
+    cudaMemcpyAsync(dqimage, query_image,  query_image_m*query_image_n*3*4, cudaMemcpyHostToDevice);
     
     
     int row = data_image_m;
@@ -201,11 +206,12 @@ int main(int argc, char **argv)
     
     int rootx = (col+31)/32;
     int rooty = (row+31)/32;
-    
-    
+
     dim3 blocks(rootx,rooty,3);
     dim3 threads(32,32,1);//many extra threads will be there
     
+    cudaDeviceSynchronize();
+
     filter<<<blocks, threads>>>(dimage, drange, query_grey, row, col, TH2, dfiltered);//filtering
 
     cudaDeviceSynchronize();
@@ -226,7 +232,6 @@ int main(int argc, char **argv)
             }
         }
     }
-    
     
     int no_filtered = coordinates.size()/3;
     cout<<"no_filtered = "<<no_filtered<<'\n';
@@ -263,15 +268,15 @@ int main(int argc, char **argv)
             result.push_back(temp);
         }
     }
-    //sort(result.begin(), result.end(), comp);
+    sort(result.begin(), result.end(), comp);
     for (int i=0; i<result.size();i++){
         cout<<result[i][1]<<','<<result[i][0]<<',';
         if(result[i][2] == 0){
-            cout<<"-45\n";
+            cout<<"-45,"<<result[i][3]<<'\n';
         }else if(result[i][2] == 1){
-            cout<<"0\n";
+            cout<<"0,"<<result[i][3]<<'\n';
         }else if (result[i][2] == 2){
-            cout<<"45\n";
+            cout<<"45,"<<result[i][3]<<'\n';
         }
     }
     cout<<"completed\n";
