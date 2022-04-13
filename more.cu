@@ -3,12 +3,16 @@
 #include <cmath>
 #include <vector>
 #include <stdio.h>
+#include <algorithm>
+#include <utility>
 using namespace std;
 
 /*
 index 0  - -45, 1 - 0, 2 - 45 
 */
 //range = xmin + xmax + ymin + ymax
+
+
 __global__ void filter(int * data_image, int * range, int query_grey,int row, int col, int TH2, char * filtered){//filer the candidates for calculting the RMSD
     int y = blockIdx.y * blockDim.y + threadIdx.y;
     int x = blockIdx.x * blockDim.x + threadIdx.x;
@@ -41,7 +45,7 @@ __global__ void filter(int * data_image, int * range, int query_grey,int row, in
 }
 
 __global__ void RMSDselect(int * data_image, int * query_image,float* cossin,
-int * coordinates,const float TH1, const int row, const int col, const int query_row, const int query_col, float * top, const int maxIndex){
+int * coordinates,const int TH1, const int row, const int col, const int query_row, const int query_col, float * top, const int maxIndex){
     
     int index = blockIdx.x*blockDim.x + threadIdx.x;
     if(index >= maxIndex){
@@ -79,7 +83,7 @@ int * coordinates,const float TH1, const int row, const int col, const int query
                     if(x1>=0 && x1<row){
                         z10 = data_image[(row-x1-1)*col*3 + y0*3 + c];
                     }
-                    color_val = (x1-rotated_x)*z00+(x0-rotated_x)*z10;
+                    color_val = (x1-rotated_x)*z00+(rotated_x-x0)*z10;
                 }else if (x0==x1 && x0>=0 && x0<row){
                     if(y0>=0 && y0<col){
                         z00 = data_image[(row-x0-1)*col*3 + y0*3 + c];
@@ -87,7 +91,7 @@ int * coordinates,const float TH1, const int row, const int col, const int query
                     if(y1>=0 && y1<col){
                         z01 = data_image[(row-x0-1)*col*3 + y1*3 + c];
                     }
-                    color_val = (y1-rotated_y)*z00+(y0-rotated_y)*z01;
+                    color_val = (y1-rotated_y)*z00+(rotated_y-y0)*z01;
                 }
                 else if(x0!=x1 && y0!=y1){
                     //bilinear over the 
@@ -107,8 +111,8 @@ int * coordinates,const float TH1, const int row, const int col, const int query
                         }
                     }
                     
-                    color_val = z00*(x1 - rotated_x)*(y1 - rotated_y) + z10*(x0 - rotated_x)*(y1-rotated_y);
-                    color_val+= z01*(x1-rotated_x)*(y0-rotated_y) + z11*(x0-rotated_x)*(y0-rotated_y);
+                    color_val = z00*(x1 - rotated_x)*(y1 - rotated_y) + z10*(rotated_x-x0)*(y1-rotated_y);
+                    color_val+= z01*(x1-rotated_x)*(rotated_y-y0) + z11*(rotated_x-x0)*(rotated_y-y0);
                 } 
                 query_val = query_image[(query_row - qx-1)*query_col*3 + qy*3 + c];
                 square_diff += (color_val-query_val)*(color_val-query_val);
@@ -117,9 +121,6 @@ int * coordinates,const float TH1, const int row, const int col, const int query
         }
     }
     float RMSD = sqrt(square_diff/(query_row*query_col*3));//figure out a way to find the square root
-    if(x==200 && y==200){
-        printf("RMSD = %.1f, TH1 = %.1f\n",RMSD, TH1);
-    }
     if(RMSD < TH1){
         top[index]=RMSD;
     }
@@ -128,12 +129,15 @@ int * coordinates,const float TH1, const int row, const int col, const int query
 
 int main(int argc, char **argv)
 {
-    if(argc != 3){
-        cout<<"Usage: ./a.out dataImage queryImage\n";
+    if(argc != 6){
+        cout<<"Usage: ./a.out dataImage queryImage TH1 TH2 n\n";
         return 0; 
     }
     string data_image_path = argv[1];
     string query_image_path = argv[2];
+    int TH1 = stoi(argv[3]);
+    int TH2 = stoi(argv[4]);
+    int N = stoi(argv[5]);
 
     // reading a matrix from a file with first line m*n
     ifstream data_image_file(data_image_path);
@@ -151,7 +155,13 @@ int main(int argc, char **argv)
     {
             data_image_file >> data_image[i];
     }
-
+    char filtered[data_image_n*data_image_m*3];
+    int *dimage, *dqimage;
+    char * dfiltered;
+    int * drange;
+    cudaMalloc(&dimage,  4*data_image_n*data_image_m*3);
+    cudaMemcpyAsync(dimage, data_image,  data_image_m*data_image_n*3*4, cudaMemcpyHostToDevice);
+    
     for (int i = 0; i < query_image_m*query_image_n*3; i++)
     {
             query_image_file >> query_image[i];
@@ -159,8 +169,8 @@ int main(int argc, char **argv)
     data_image_file.close();
     query_image_file.close();
     cout<<"size of data "<<sizeof(data_image)/sizeof(data_image[0])<<'\n';
-    cout<<"file read\n";
     //0 = -45, 1 = 0, 2 = 45
+    
     int range[] = {0, 0, floor(-0.707*query_image_n),
     ceil((query_image_m + query_image_n)*0.707), query_image_m, ceil(query_image_m*0.707),
     floor(-0.707* query_image_m), 0, 0,
@@ -168,23 +178,13 @@ int main(int argc, char **argv)
     
     
     
-    char filtered[data_image_n*data_image_m*3];
-    int *dimage, *dqimage;
-    char * dfiltered;
-    int * drange;
-    
     cudaMalloc(&drange, 12*4);
-    cudaMalloc(&dimage,  4*data_image_n*data_image_m*3);
     cudaMalloc(&dfiltered, data_image_n*data_image_m*3);//allocate an array for to mark the filtered values
     cudaMalloc(&dqimage,  4*query_image_n*query_image_m*3);
 
     cudaMemcpy(drange, range, 12*4, cudaMemcpyHostToDevice);
-    cudaMemcpy(dimage, data_image,  data_image_m*data_image_n*3*4, cudaMemcpyHostToDevice);
     cudaMemcpy(dqimage, query_image,  query_image_m*query_image_n*3*4, cudaMemcpyHostToDevice);
     
-    
-    float TH2 = 10;//for difference between grey of the q and d
-    //float TH1 = 20;//RMSD difference
     
     int row = data_image_m;
     int col = data_image_n;
@@ -206,7 +206,7 @@ int main(int argc, char **argv)
     dim3 blocks(rootx,rooty,3);
     dim3 threads(32,32,1);//many extra threads will be there
     
-    filter<<<blocks, threads>>>(dimage, drange, query_grey, row, col, TH2, dfiltered);
+    filter<<<blocks, threads>>>(dimage, drange, query_grey, row, col, TH2, dfiltered);//filtering
 
     cudaDeviceSynchronize();
     cudaMemcpy(filtered, dfiltered, row*col*3, cudaMemcpyDeviceToHost);
@@ -219,10 +219,6 @@ int main(int argc, char **argv)
         for (int y=0; y<col;y++){
             for (int theta=0;theta<3;theta++){
                 if(filtered[(row-x-1)*col*3 + y*3 + theta]==1){
-                    if(x==200 && y==200){
-                        cout<<"yes!!!\n";
-                    }
-                    //cout<<j<<','<<i<<','<<theta<<'\n';
                     coordinates.push_back(x);
                     coordinates.push_back(y);
                     coordinates.push_back(theta);
@@ -230,7 +226,6 @@ int main(int argc, char **argv)
             }
         }
     }
-    cudaFree(dfiltered);
     
     
     int no_filtered = coordinates.size()/3;
@@ -239,8 +234,7 @@ int main(int argc, char **argv)
     float * dcossin;
     float * dtops;
     float tops[no_filtered];
-    float TH1 = 9;
-    float cossin[] = {0.707, 1, 0.707, -0.707, 0, 0.707};
+    float cossin[] = {0.707106, 1, 0.707106, -0.707106, 0, 0.707106};
     cudaMalloc(&dcossin, 6*sizeof(float));
     cudaMemcpy(dcossin, cossin, 6*sizeof(float), cudaMemcpyHostToDevice);
     cudaMalloc(&dtops,no_filtered*sizeof(float));
@@ -257,11 +251,27 @@ int main(int argc, char **argv)
     cout<<cudaGetErrorString(err)<<'\n';
     cudaMemcpy(tops, dtops, no_filtered*sizeof(float), cudaMemcpyDeviceToHost);
     cudaDeviceSynchronize();
+
+    vector<vector<float>> result;
     for (int i=0;i<no_filtered;i++){
         if(tops[i]!=-1){
-            //if(coordinates[3*i+2] == 0){
-                cout<<coordinates[3*i]<<','<<coordinates[3*i+1]<<','<<coordinates[3*i+2]<<'\n';
-            //}
+            vector<float> temp;
+            temp.push_back(coordinates[3*i]);
+            temp.push_back(coordinates[3*i+1]);
+            temp.push_back(coordinates[3*i+2]);
+            temp.push_back(tops[i]); 
+            result.push_back(temp);
+        }
+    }
+    //sort(result.begin(), result.end(), comp);
+    for (int i=0; i<result.size();i++){
+        cout<<result[i][1]<<','<<result[i][0]<<',';
+        if(result[i][2] == 0){
+            cout<<"-45\n";
+        }else if(result[i][2] == 1){
+            cout<<"0\n";
+        }else if (result[i][2] == 2){
+            cout<<"45\n";
         }
     }
     cout<<"completed\n";
