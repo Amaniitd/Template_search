@@ -15,7 +15,7 @@ bool comp(const pair<float,float>& a, const pair<float,float>& b){
     return a.second<b.second;
 }
 
-__global__ void filter(int * data_image, int * range, int query_grey,int row, int col, int query_row, int query_col, int TH2, char * filtered){//filer the candidates for calculting the RMSD
+__global__ void filter(int * data_image, int * range, float query_grey,int row, int col, int query_row, int query_col, float TH2, char * filtered){//filer the candidates for calculting the RMSD
     int y = blockIdx.y * blockDim.y + threadIdx.y;
     int x = blockIdx.x * blockDim.x + threadIdx.x;
     if(x>=col-query_col || y>=row-query_row){
@@ -36,18 +36,17 @@ __global__ void filter(int * data_image, int * range, int query_grey,int row, in
         }
     }
     grey_sum = grey_sum/( (range[9+theta] - range[6+theta])*(range[3+theta] - range[theta])*3);
-
-    if ( (grey_sum - query_grey)<TH2 && (grey_sum - query_grey) > -1*TH2){
-        //printf("%d,%d,%d,%0.6f\n", x,y,theta,grey_sum);
-        filtered[(row-1-y)*col*3 + x*3 + theta] = 1;
+    
+    if ( (grey_sum - query_grey) <= TH2 && (grey_sum - query_grey) >= -1*TH2){
+        filtered[(row-1-x)*col*3 + y*3 + theta] = 1;
     }else{
-        filtered[(row-1-y)*col*3 + x*3 + theta] = 0;
+        filtered[(row-1-x)*col*3 + y*3 + theta] = 0;
     }
     
 }
 
 __global__ void RMSDselect(int * data_image, int * query_image,float* cossin,
-int * coordinates,const int TH1, const int row, const int col, const int query_row, const int query_col, float * top, const int maxIndex){
+int * coordinates,const float TH1, const int row, const int col, const int query_row, const int query_col, float * top, const int maxIndex){
     
     int index = blockIdx.x*blockDim.x + threadIdx.x;
     if(index >= maxIndex){
@@ -123,7 +122,7 @@ int * coordinates,const int TH1, const int row, const int col, const int query_r
         }
     }
     float RMSD = sqrt(square_diff/(query_row*query_col*3));//figure out a way to find the square root
-    if(RMSD < TH1){
+    if(RMSD <= TH1){
         top[index]=RMSD;
     }
 
@@ -137,8 +136,8 @@ int main(int argc, char **argv)
     }
     string data_image_path = argv[1];
     string query_image_path = argv[2];
-    int TH1 = stoi(argv[3]);
-    int TH2 = stoi(argv[4]);
+    float TH1 = stof(argv[3]);
+    float TH2 = stof(argv[4]);
     int N = stoi(argv[5]);
 
     // reading a matrix from a file with first line m*n
