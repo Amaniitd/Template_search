@@ -11,14 +11,14 @@ using namespace std;
 index 0  - -45, 1 - 0, 2 - 45 
 */
 //range = xmin + xmax + ymin + ymax
-bool comp(const vector<float>& a, vector<float>& b){
-    return a[3]<b[3];
+bool comp(const pair<float,float>& a, const pair<float,float>& b){
+    return a.second<b.second;
 }
 
-__global__ void filter(int * data_image, int * range, int query_grey,int row, int col, int TH2, char * filtered){//filer the candidates for calculting the RMSD
+__global__ void filter(int * data_image, int * range, int query_grey,int row, int col, int query_row, int query_col, int TH2, char * filtered){//filer the candidates for calculting the RMSD
     int y = blockIdx.y * blockDim.y + threadIdx.y;
     int x = blockIdx.x * blockDim.x + threadIdx.x;
-    if(x>=col || y>=row){
+    if(x>=col-query_col || y>=row-query_row){
         return;
     }
     int theta = blockIdx.z;
@@ -204,15 +204,15 @@ int main(int argc, char **argv)
     cout<<"query grey "<<query_grey<<'\n';
     
     
-    int rootx = (col+31)/32;
-    int rooty = (row+31)/32;
+    int rootx = (col - query_col + 31)/32;
+    int rooty = (row - query_row + 31)/32;
 
     dim3 blocks(rootx,rooty,3);
     dim3 threads(32,32,1);//many extra threads will be there
     
     cudaDeviceSynchronize();
 
-    filter<<<blocks, threads>>>(dimage, drange, query_grey, row, col, TH2, dfiltered);//filtering
+    filter<<<blocks, threads>>>(dimage, drange, query_grey, row, col,query_row,query_col, TH2, dfiltered);//filtering
 
     cudaDeviceSynchronize();
     cudaMemcpy(filtered, dfiltered, row*col*3, cudaMemcpyDeviceToHost);
@@ -257,26 +257,28 @@ int main(int argc, char **argv)
     cudaMemcpy(tops, dtops, no_filtered*sizeof(float), cudaMemcpyDeviceToHost);
     cudaDeviceSynchronize();
 
-    vector<vector<float>> result;
+    vector<pair<float,float>> result;
     for (int i=0;i<no_filtered;i++){
         if(tops[i]!=-1){
-            vector<float> temp;
-            temp.push_back(coordinates[3*i]);
-            temp.push_back(coordinates[3*i+1]);
-            temp.push_back(coordinates[3*i+2]);
-            temp.push_back(tops[i]); 
+            pair<float,float> temp;
+            temp.first = i;
+            temp.second = tops[i];
             result.push_back(temp);
         }
     }
     sort(result.begin(), result.end(), comp);
-    for (int i=0; i<result.size();i++){
-        cout<<result[i][1]<<','<<result[i][0]<<',';
-        if(result[i][2] == 0){
-            cout<<"-45,"<<result[i][3]<<'\n';
-        }else if(result[i][2] == 1){
-            cout<<"0,"<<result[i][3]<<'\n';
-        }else if (result[i][2] == 2){
-            cout<<"45,"<<result[i][3]<<'\n';
+    int size = result.size();
+    int outputs = min(size, N);
+    for (int j=0; j < outputs;j++){
+        int i = result[j].first;
+        printf("%0.3f,%d,%d,",result[j].second, coordinates[3*i], coordinates[3*i+1]);
+        int angle = coordinates[3*i+2];
+        if(angle==0){
+            printf("-45\n");
+        }else if(angle==1){
+            printf("0\n");
+        }else if(angle==2){
+            printf("45\n");
         }
     }
     cout<<"completed\n";
