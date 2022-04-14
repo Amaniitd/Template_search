@@ -42,7 +42,6 @@ __global__ void filter(int * data_image, int * range, float query_grey,int row, 
     }else{
         filtered[(row-1-x)*col*3 + y*3 + theta] = 0;
     }
-    
 }
 
 __global__ void RMSDselect(int * data_image, int * query_image,float* cossin,
